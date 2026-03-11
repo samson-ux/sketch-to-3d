@@ -7,7 +7,7 @@ fal.config({
 
 export async function POST(request: NextRequest) {
   try {
-    const { image, customPrompt } = await request.json();
+    const { image } = await request.json();
 
     if (!image) {
       return NextResponse.json({ error: "No image provided" }, { status: 400 });
@@ -30,25 +30,17 @@ export async function POST(request: NextRequest) {
     const imageUrl = await fal.storage.upload(file);
     console.log("Uploaded image URL:", imageUrl);
 
-    // Build the prompt for 3D rendering
-    const basePrompt =
-      "Convert this sketch into a stunning photorealistic 3D render, high detail, professional studio lighting, octane render style";
-    const prompt = customPrompt
-      ? `${basePrompt}. ${customPrompt}`
-      : basePrompt;
-
-    console.log("Calling fal.ai with prompt:", prompt);
-
-    // Use fal.ai FLUX.1 dev image-to-image for sketch-to-3D rendering
-    const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
+    // Use Trellis for actual 3D model generation (outputs GLB mesh)
+    console.log("Generating 3D model with Trellis...");
+    const result = await fal.subscribe("fal-ai/trellis", {
       input: {
-        prompt,
         image_url: imageUrl,
-        num_inference_steps: 40,
-        guidance_scale: 3.5,
-        strength: 0.85,
-        num_images: 1,
-        enable_safety_checker: true,
+        ss_guidance_strength: 7.5,
+        ss_sampling_steps: 12,
+        slat_guidance_strength: 3,
+        slat_sampling_steps: 12,
+        mesh_simplify: 0.95,
+        texture_size: "1024",
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -56,20 +48,20 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log("fal.ai result:", JSON.stringify(result.data, null, 2));
+    console.log("Trellis result:", JSON.stringify(result.data, null, 2));
 
     const output = result.data as Record<string, unknown>;
-    const images = output?.images as Array<{ url: string }> | undefined;
+    const modelMesh = output?.model_mesh as { url: string } | undefined;
 
-    if (!images || images.length === 0) {
+    if (!modelMesh?.url) {
       return NextResponse.json(
-        { error: "No image was generated" },
+        { error: "No 3D model was generated" },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      imageUrl: images[0].url,
+      modelUrl: modelMesh.url,
     });
   } catch (error: unknown) {
     console.error("Generation error:", error);

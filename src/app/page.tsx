@@ -1,18 +1,28 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import DrawingCanvas from "@/components/DrawingCanvas";
+
+// Dynamically import the 3D viewer to avoid SSR issues with Three.js
+const ModelViewer = dynamic(() => import("@/components/ModelViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[500px] flex items-center justify-center bg-[#0a0a0a] rounded-xl">
+      <p className="text-gray-500">Loading 3D viewer...</p>
+    </div>
+  ),
+});
 
 export default function Home() {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
-  const [resultImage, setResultImage] = useState<string | null>(null);
-  const [customPrompt, setCustomPrompt] = useState("");
+  const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async (dataUrl: string) => {
     setSourceImage(dataUrl);
-    setResultImage(null);
+    setModelUrl(null);
     setError(null);
     setLoading(true);
 
@@ -20,10 +30,7 @@ export default function Home() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: dataUrl,
-          customPrompt: customPrompt.trim() || undefined,
-        }),
+        body: JSON.stringify({ image: dataUrl }),
       });
 
       const data = await response.json();
@@ -32,7 +39,7 @@ export default function Home() {
         throw new Error(data.error || "Generation failed");
       }
 
-      setResultImage(data.imageUrl);
+      setModelUrl(data.modelUrl);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
@@ -43,20 +50,20 @@ export default function Home() {
   };
 
   const handleDownload = async () => {
-    if (!resultImage) return;
+    if (!modelUrl) return;
     try {
-      const response = await fetch(resultImage);
+      const response = await fetch(modelUrl);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `sketch-to-3d-${Date.now()}.png`;
+      a.download = `sketch-to-3d-${Date.now()}.glb`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch {
-      window.open(resultImage, "_blank");
+      window.open(modelUrl, "_blank");
     }
   };
 
@@ -74,7 +81,7 @@ export default function Home() {
                 Sketch to 3D
               </h1>
               <p className="text-xs text-gray-500">
-                AI-Powered 3D Rendering
+                AI-Powered 3D Model Generation
               </p>
             </div>
           </div>
@@ -90,21 +97,6 @@ export default function Home() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Custom prompt input */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-400 mb-2">
-            Custom Style Prompt{" "}
-            <span className="text-gray-600">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={customPrompt}
-            onChange={(e) => setCustomPrompt(e.target.value)}
-            placeholder='e.g. "make it look like a Pixar 3D character" or "sci-fi metal material"'
-            className="w-full px-4 py-3 rounded-xl bg-surface border border-border text-foreground placeholder-gray-600 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
-          />
-        </div>
-
         {/* Main content: Canvas + Result */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left: Drawing Canvas */}
@@ -115,24 +107,24 @@ export default function Home() {
             <DrawingCanvas onImageReady={handleGenerate} />
           </div>
 
-          {/* Right: Result */}
+          {/* Right: 3D Result */}
           <div>
             <h2 className="text-sm font-medium text-gray-400 mb-3">
-              3D Result
+              3D Model
             </h2>
-            <div className="rounded-xl border border-border bg-surface min-h-[500px] flex items-center justify-center overflow-hidden relative">
+            <div className="rounded-xl border border-border bg-surface overflow-hidden">
               {loading && (
-                <div className="flex flex-col items-center gap-4">
+                <div className="min-h-[500px] flex flex-col items-center justify-center gap-4">
                   <div className="relative">
                     <div className="w-16 h-16 border-4 border-border rounded-full" />
                     <div className="absolute inset-0 w-16 h-16 border-4 border-transparent border-t-accent rounded-full animate-spin" />
                   </div>
                   <div className="text-center">
                     <p className="text-accent font-medium animate-pulse-green">
-                      Generating 3D render...
+                      Generating 3D model...
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      This may take 15-30 seconds
+                      This may take 30-60 seconds
                     </p>
                   </div>
                   {sourceImage && (
@@ -148,7 +140,7 @@ export default function Home() {
               )}
 
               {!loading && error && (
-                <div className="flex flex-col items-center gap-3 p-8 text-center">
+                <div className="min-h-[500px] flex flex-col items-center justify-center gap-3 p-8 text-center">
                   <div className="w-12 h-12 rounded-full bg-red-900/30 flex items-center justify-center text-2xl">
                     ⚠️
                   </div>
@@ -157,23 +149,19 @@ export default function Home() {
                 </div>
               )}
 
-              {!loading && !error && resultImage && (
-                <div className="w-full h-full flex flex-col">
-                  <img
-                    src={resultImage}
-                    alt="Generated 3D render"
-                    className="w-full h-auto rounded-t-xl"
-                  />
-                  <div className="p-4 flex gap-3">
+              {!loading && !error && modelUrl && (
+                <div className="flex flex-col">
+                  <ModelViewer modelUrl={modelUrl} />
+                  <div className="p-4 flex gap-3 border-t border-border">
                     <button
                       onClick={handleDownload}
                       className="flex-1 py-2.5 rounded-lg font-medium bg-accent text-black hover:bg-accent-hover transition-colors active:scale-[0.98]"
                     >
-                      ⬇ Download Result
+                      ⬇ Download 3D Model (.glb)
                     </button>
                     <button
                       onClick={() => {
-                        setResultImage(null);
+                        setModelUrl(null);
                         setSourceImage(null);
                       }}
                       className="px-4 py-2.5 rounded-lg font-medium bg-surface-light text-foreground hover:bg-border transition-colors"
@@ -184,45 +172,33 @@ export default function Home() {
                 </div>
               )}
 
-              {!loading && !error && !resultImage && (
-                <div className="flex flex-col items-center gap-3 text-center p-8">
+              {!loading && !error && !modelUrl && (
+                <div className="min-h-[500px] flex flex-col items-center justify-center gap-3 text-center p-8">
                   <div className="w-16 h-16 rounded-2xl bg-surface-light flex items-center justify-center text-3xl">
-                    🖼️
+                    🧊
                   </div>
                   <p className="text-gray-500">
-                    Your 3D render will appear here
+                    Your 3D model will appear here
                   </p>
                   <p className="text-xs text-gray-600">
-                    Draw a sketch and click &quot;Generate 3D&quot;
+                    Draw a sketch and click &quot;Generate 3D&quot; to create an
+                    interactive 3D model you can spin and explore
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Side-by-side comparison */}
-            {!loading && resultImage && sourceImage && (
+            {/* Source image reference */}
+            {!loading && modelUrl && sourceImage && (
               <div className="mt-4 p-4 rounded-xl bg-surface border border-border">
-                <p className="text-xs text-gray-500 mb-3 font-medium">
-                  Comparison
+                <p className="text-xs text-gray-500 mb-2 font-medium">
+                  Original Sketch
                 </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Original</p>
-                    <img
-                      src={sourceImage}
-                      alt="Original sketch"
-                      className="w-full rounded-lg border border-border"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">3D Render</p>
-                    <img
-                      src={resultImage}
-                      alt="3D render"
-                      className="w-full rounded-lg border border-border"
-                    />
-                  </div>
-                </div>
+                <img
+                  src={sourceImage}
+                  alt="Original sketch"
+                  className="w-32 rounded-lg border border-border"
+                />
               </div>
             )}
           </div>
