@@ -103,7 +103,21 @@ export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
   const exportCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png");
+
+    // Create a copy with white background for better 3D model generation
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = canvas.width;
+    exportCanvas.height = canvas.height;
+    const exportCtx = exportCanvas.getContext("2d")!;
+
+    // White background
+    exportCtx.fillStyle = "#ffffff";
+    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+    // Draw the sketch on top
+    exportCtx.drawImage(canvas, 0, 0);
+
+    const dataUrl = exportCanvas.toDataURL("image/png");
     onImageReady(dataUrl);
   }, [onImageReady]);
 

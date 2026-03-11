@@ -30,43 +30,80 @@ export async function POST(request: NextRequest) {
     const imageUrl = await fal.storage.upload(file);
     console.log("Uploaded image URL:", imageUrl);
 
-    // Use Trellis for actual 3D model generation (outputs GLB mesh)
-    console.log("Generating 3D model with Trellis...");
-    const result = await fal.subscribe("fal-ai/trellis", {
-      input: {
-        image_url: imageUrl,
-        ss_guidance_strength: 7.5,
-        ss_sampling_steps: 12,
-        slat_guidance_strength: 3,
-        slat_sampling_steps: 12,
-        mesh_simplify: 0.95,
-        texture_size: "1024",
-      },
-      logs: true,
-      onQueueUpdate: (update) => {
-        console.log("Queue status:", update.status);
-      },
-    });
+    // Try Trellis first for higher quality, fall back to TripoSR
+    console.log("Generating 3D model...");
+    let modelUrl: string | null = null;
 
-    console.log("Trellis result:", JSON.stringify(result.data, null, 2));
+    try {
+      console.log("Trying Trellis...");
+      const result = await fal.subscribe("fal-ai/trellis", {
+        input: {
+          image_url: imageUrl,
+        },
+        logs: true,
+        onQueueUpdate: (update) => {
+          console.log("Trellis queue:", update.status);
+        },
+      });
 
-    const output = result.data as Record<string, unknown>;
-    const modelMesh = output?.model_mesh as { url: string } | undefined;
+      console.log("Trellis result:", JSON.stringify(result.data, null, 2));
+      const output = result.data as Record<string, unknown>;
+      const modelMesh = output?.model_mesh as { url: string } | undefined;
+      if (modelMesh?.url) {
+        modelUrl = modelMesh.url;
+      }
+    } catch (trellisError) {
+      console.error("Trellis failed, trying TripoSR...", trellisError);
 
-    if (!modelMesh?.url) {
+      // Fallback to TripoSR
+      const result = await fal.subscribe("fal-ai/triposr", {
+        input: {
+          image_url: imageUrl,
+          output_format: "glb",
+          do_remove_background: true,
+          foreground_ratio: 0.9,
+          mc_resolution: 256,
+        },
+        logs: true,
+        onQueueUpdate: (update) => {
+          console.log("TripoSR queue:", update.status);
+        },
+      });
+
+      console.log("TripoSR result:", JSON.stringify(result.data, null, 2));
+      const output = result.data as Record<string, unknown>;
+      const modelMesh = output?.model_mesh as { url: string } | undefined;
+      if (modelMesh?.url) {
+        modelUrl = modelMesh.url;
+      }
+    }
+
+    if (!modelUrl) {
       return NextResponse.json(
         { error: "No 3D model was generated" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({
-      modelUrl: modelMesh.url,
-    });
+    return NextResponse.json({ modelUrl });
   } catch (error: unknown) {
-    console.error("Generation error:", error);
-    const message =
-      error instanceof Error ? error.message : "Generation failed";
+    console.error("Generation error:", JSON.stringify(error, null, 2));
+    let message = "Generation failed";
+    if (error instanceof Error) {
+      message = error.message;
+    }
+    // fal.ai errors often have a body with details
+    if (typeof error === "object" && error !== null) {
+      const e = error as Record<string, unknown>;
+      if (e.body) {
+        console.error("Error body:", JSON.stringify(e.body, null, 2));
+        const body = e.body as Record<string, unknown>;
+        if (body.detail) message = String(body.detail);
+      }
+      if (e.status) {
+        console.error("Error status:", e.status);
+      }
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
