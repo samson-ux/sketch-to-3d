@@ -20,6 +20,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Convert base64 data URL to a File and upload to fal.ai storage
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(base64Data, "base64");
+    const blob = new Blob([buffer], { type: "image/png" });
+    const file = new File([blob], "sketch.png", { type: "image/png" });
+
+    console.log("Uploading image to fal.ai storage...");
+    const imageUrl = await fal.storage.upload(file);
+    console.log("Uploaded image URL:", imageUrl);
+
     // Build the prompt for 3D rendering
     const basePrompt =
       "Convert this sketch into a stunning photorealistic 3D render, high detail, professional studio lighting, octane render style";
@@ -27,20 +37,26 @@ export async function POST(request: NextRequest) {
       ? `${basePrompt}. ${customPrompt}`
       : basePrompt;
 
-    // Use fal.ai's image-to-image with SDXL for best 3D rendering from sketches
-    const result = await fal.subscribe("fal-ai/stable-diffusion-3-medium", {
+    console.log("Calling fal.ai with prompt:", prompt);
+
+    // Use fal.ai FLUX.1 dev image-to-image for sketch-to-3D rendering
+    const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
       input: {
         prompt,
-        image_url: image,
-        image_size: "square_hd",
-        num_inference_steps: 28,
-        guidance_scale: 7.5,
-        strength: 0.75,
+        image_url: imageUrl,
+        num_inference_steps: 40,
+        guidance_scale: 3.5,
+        strength: 0.85,
         num_images: 1,
         enable_safety_checker: true,
       },
       logs: true,
+      onQueueUpdate: (update) => {
+        console.log("Queue status:", update.status);
+      },
     });
+
+    console.log("fal.ai result:", JSON.stringify(result.data, null, 2));
 
     const output = result.data as Record<string, unknown>;
     const images = output?.images as Array<{ url: string }> | undefined;
