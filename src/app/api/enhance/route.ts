@@ -33,14 +33,14 @@ export async function POST(request: NextRequest) {
     // Use Flux Dev image-to-image to enhance the sketch with depth cues
     const enhancePrompt =
       prompt ||
-      "3D rendered object with strong volumetric depth, thick solid form, realistic shadows and highlights, ambient occlusion, multiple depth layers, studio lighting, centered on white background, photorealistic, NOT flat, NOT 2D, NOT a cutout";
+      "same object, add realistic shading, shadows, highlights, and surface texture, preserve exact shape and proportions, 3D render, studio lighting, white background";
 
     console.log("Enhancing sketch with Flux Dev img2img...");
     const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
       input: {
         image_url: imageUrl,
         prompt: enhancePrompt,
-        strength: strength ?? 0.85,
+        strength: strength ?? 0.55,
         num_inference_steps: 35,
         guidance_scale: 7.5,
       },
