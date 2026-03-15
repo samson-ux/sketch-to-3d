@@ -46,6 +46,9 @@ export default function Home() {
 
         if (!enhanceRes.ok) {
           console.warn("Enhancement failed, proceeding with raw sketch:", enhanceData.error);
+          setError("Enhancement failed — 3D quality may be reduced. Generating anyway...");
+          // Clear the error after a moment so it doesn't block the flow
+          setTimeout(() => setError(null), 3000);
         } else {
           enhancedImageUrl = enhanceData.enhancedImageUrl;
           setEnhancedImage(enhancedImageUrl ?? null);

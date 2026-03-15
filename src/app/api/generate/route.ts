@@ -38,51 +38,78 @@ export async function POST(request: NextRequest) {
       console.log("Uploaded image URL:", imageUrl);
     }
 
-    // Try Trellis first for higher quality, fall back to TripoSR
+    // Try Hunyuan3D-2 first for best depth, fall back to Trellis, then TripoSR
     console.log("Generating 3D model...");
     let modelUrl: string | null = null;
 
     try {
-      console.log("Trying Trellis...");
-      const result = await fal.subscribe("fal-ai/trellis", {
+      console.log("Trying Hunyuan3D-2...");
+      const result = await fal.subscribe("fal-ai/hunyuan-3d-2", {
         input: {
           image_url: imageUrl,
+          output_format: "glb",
+          remove_background: true,
+          steps: 30,
+          guidance_scale: 5.5,
         },
         logs: true,
         onQueueUpdate: (update) => {
-          console.log("Trellis queue:", update.status);
+          console.log("Hunyuan3D-2 queue:", update.status);
         },
       });
 
-      console.log("Trellis result:", JSON.stringify(result.data, null, 2));
+      console.log("Hunyuan3D-2 result:", JSON.stringify(result.data, null, 2));
       const output = result.data as Record<string, unknown>;
+      // Hunyuan3D-2 returns model_mesh with url
       const modelMesh = output?.model_mesh as { url: string } | undefined;
       if (modelMesh?.url) {
         modelUrl = modelMesh.url;
       }
-    } catch (trellisError) {
-      console.error("Trellis failed, trying TripoSR...", trellisError);
+    } catch (hunyuanError) {
+      console.error("Hunyuan3D-2 failed, trying Trellis...", hunyuanError);
 
-      // Fallback to TripoSR
-      const result = await fal.subscribe("fal-ai/triposr", {
-        input: {
-          image_url: imageUrl,
-          output_format: "glb",
-          do_remove_background: true,
-          foreground_ratio: 0.9,
-          mc_resolution: 256,
-        },
-        logs: true,
-        onQueueUpdate: (update) => {
-          console.log("TripoSR queue:", update.status);
-        },
-      });
+      try {
+        console.log("Trying Trellis...");
+        const result = await fal.subscribe("fal-ai/trellis", {
+          input: {
+            image_url: imageUrl,
+          },
+          logs: true,
+          onQueueUpdate: (update) => {
+            console.log("Trellis queue:", update.status);
+          },
+        });
 
-      console.log("TripoSR result:", JSON.stringify(result.data, null, 2));
-      const output = result.data as Record<string, unknown>;
-      const modelMesh = output?.model_mesh as { url: string } | undefined;
-      if (modelMesh?.url) {
-        modelUrl = modelMesh.url;
+        console.log("Trellis result:", JSON.stringify(result.data, null, 2));
+        const output = result.data as Record<string, unknown>;
+        const modelMesh = output?.model_mesh as { url: string } | undefined;
+        if (modelMesh?.url) {
+          modelUrl = modelMesh.url;
+        }
+      } catch (trellisError) {
+        console.error("Trellis failed, trying TripoSR...", trellisError);
+
+        // Final fallback to TripoSR with higher resolution
+        const result = await fal.subscribe("fal-ai/triposr", {
+          input: {
+            image_url: imageUrl,
+            output_format: "glb",
+            do_remove_background: true,
+            foreground_ratio: 0.85,
+            mc_resolution: 512,
+          },
+          logs: true,
+          onQueueUpdate: (update) => {
+            console.log("TripoSR queue:", update.status);
+          },
+        });
+
+        console.log("TripoSR result:", JSON.stringify(result.data, null, 2));
+        const output = result.data as Record<string, unknown>;
+        const modelMesh = output?.model_mesh as { url: string } | undefined;
+        if (modelMesh?.url) {
+          modelUrl = modelMesh.url;
+        }
       }
     }
 
