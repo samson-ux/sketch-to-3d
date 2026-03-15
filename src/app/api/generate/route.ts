@@ -7,9 +7,9 @@ fal.config({
 
 export async function POST(request: NextRequest) {
   try {
-    const { image } = await request.json();
+    const { image, enhancedImageUrl } = await request.json();
 
-    if (!image) {
+    if (!image && !enhancedImageUrl) {
       return NextResponse.json({ error: "No image provided" }, { status: 400 });
     }
 
@@ -20,15 +20,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert base64 data URL to a File and upload to fal.ai storage
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-    const buffer = Buffer.from(base64Data, "base64");
-    const blob = new Blob([buffer], { type: "image/png" });
-    const file = new File([blob], "sketch.png", { type: "image/png" });
+    let imageUrl: string;
 
-    console.log("Uploading image to fal.ai storage...");
-    const imageUrl = await fal.storage.upload(file);
-    console.log("Uploaded image URL:", imageUrl);
+    if (enhancedImageUrl) {
+      // Use the pre-enhanced image URL directly (already in fal.ai storage)
+      imageUrl = enhancedImageUrl;
+      console.log("Using enhanced image URL:", imageUrl);
+    } else {
+      // Convert base64 data URL to a File and upload to fal.ai storage
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      const blob = new Blob([buffer], { type: "image/png" });
+      const file = new File([blob], "sketch.png", { type: "image/png" });
+
+      console.log("Uploading image to fal.ai storage...");
+      imageUrl = await fal.storage.upload(file);
+      console.log("Uploaded image URL:", imageUrl);
+    }
 
     // Try Trellis first for higher quality, fall back to TripoSR
     console.log("Generating 3D model...");

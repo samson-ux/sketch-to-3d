@@ -8,11 +8,13 @@ interface DrawingCanvasProps {
 
 export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pointsRef = useRef<{ x: number; y: number }[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(4);
   const [brushColor, setBrushColor] = useState("#22c55e");
   const [tool, setTool] = useState<"draw" | "erase">("draw");
   const [hasContent, setHasContent] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
 
   const colors = [
     "#22c55e",
@@ -63,6 +65,7 @@ export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
     if (!ctx) return;
 
     const { x, y } = getPos(e);
+    pointsRef.current = [{ x, y }];
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
@@ -76,16 +79,38 @@ export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
     if (!ctx) return;
 
     const { x, y } = getPos(e);
+    const pts = pointsRef.current;
+
+    // Skip points too close together to reduce noise
+    if (pts.length > 0) {
+      const last = pts[pts.length - 1];
+      if (Math.hypot(x - last.x, y - last.y) < 2) return;
+    }
+
+    pts.push({ x, y });
+
     ctx.lineWidth = brushSize;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = tool === "erase" ? "#0a0a0a" : brushColor;
-    ctx.lineTo(x, y);
-    ctx.stroke();
+
+    if (pts.length >= 3) {
+      // Use quadratic Bezier curves through midpoints for smooth strokes
+      const p1 = pts[pts.length - 2];
+      const p2 = pts[pts.length - 1];
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      ctx.quadraticCurveTo(p1.x, p1.y, midX, midY);
+      ctx.stroke();
+    } else {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
   };
 
   const stopDrawing = () => {
     if (isDrawing) {
+      pointsRef.current = [];
       setHasContent(true);
       setIsDrawing(false);
     }
@@ -120,6 +145,67 @@ export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
     const dataUrl = exportCanvas.toDataURL("image/png");
     onImageReady(dataUrl);
   }, [onImageReady]);
+
+  const autoEnhanceDrawing = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Export with white background
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext("2d")!;
+    tempCtx.fillStyle = "#ffffff";
+    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    tempCtx.drawImage(canvas, 0, 0);
+    const dataUrl = tempCanvas.toDataURL("image/png");
+
+    setEnhancing(true);
+    try {
+      const res = await fetch("/api/enhance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: dataUrl,
+          prompt:
+            "clean professional line drawing, smooth precise lines, clear outlines, well-defined shapes, white background",
+          strength: 0.3,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("Auto-enhance failed:", data.error);
+        return;
+      }
+
+      // Draw the enhanced image back onto the canvas
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        // Dark background first
+        ctx.fillStyle = "#0a0a0a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Draw enhanced image scaled to fit
+        const scale = Math.min(
+          canvas.width / img.width,
+          canvas.height / img.height
+        );
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const x = (canvas.width - w) / 2;
+        const y = (canvas.height - h) / 2;
+        ctx.drawImage(img, x, y, w, h);
+      };
+      img.src = data.enhancedImageUrl;
+    } catch (err) {
+      console.error("Auto-enhance error:", err);
+    } finally {
+      setEnhancing(false);
+    }
+  };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,6 +325,14 @@ export default function DrawingCanvas({ onImageReady }: DrawingCanvasProps) {
             className="hidden"
           />
         </label>
+
+        <button
+          onClick={autoEnhanceDrawing}
+          disabled={!hasContent || enhancing}
+          className="px-3 py-1.5 rounded-lg text-sm font-medium bg-accent/20 text-accent hover:bg-accent/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          {enhancing ? "Enhancing..." : "Auto-Enhance"}
+        </button>
       </div>
 
       {/* Canvas */}

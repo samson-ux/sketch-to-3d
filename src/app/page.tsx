@@ -16,21 +16,48 @@ const ModelViewer = dynamic(() => import("@/components/ModelViewer"), {
 
 export default function Home() {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
+  const [enhancedImage, setEnhancedImage] = useState<string | null>(null);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<"enhancing" | "generating" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [skipEnhance, setSkipEnhance] = useState(false);
 
   const handleGenerate = async (dataUrl: string) => {
     setSourceImage(dataUrl);
+    setEnhancedImage(null);
     setModelUrl(null);
     setError(null);
     setLoading(true);
 
     try {
+      let enhancedImageUrl: string | undefined;
+
+      if (!skipEnhance) {
+        // Step 1: Enhance the sketch with AI for better depth
+        setPhase("enhancing");
+        const enhanceRes = await fetch("/api/enhance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: dataUrl }),
+        });
+
+        const enhanceData = await enhanceRes.json();
+
+        if (!enhanceRes.ok) {
+          console.warn("Enhancement failed, proceeding with raw sketch:", enhanceData.error);
+        } else {
+          enhancedImageUrl = enhanceData.enhancedImageUrl;
+          setEnhancedImage(enhancedImageUrl ?? null);
+        }
+      }
+
+      // Step 2: Generate 3D model
+      setPhase("generating");
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: dataUrl }),
+        body: JSON.stringify({ image: dataUrl, enhancedImageUrl }),
       });
 
       const data = await response.json();
@@ -46,6 +73,7 @@ export default function Home() {
       setError(message);
     } finally {
       setLoading(false);
+      setPhase(null);
     }
   };
 
@@ -101,9 +129,20 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left: Drawing Canvas */}
           <div>
-            <h2 className="text-sm font-medium text-gray-400 mb-3">
-              Your Sketch
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-medium text-gray-400">
+                Your Sketch
+              </h2>
+              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipEnhance}
+                  onChange={(e) => setSkipEnhance(e.target.checked)}
+                  className="accent-accent w-3.5 h-3.5"
+                />
+                Skip AI enhancement
+              </label>
+            </div>
             <DrawingCanvas onImageReady={handleGenerate} />
           </div>
 
@@ -121,21 +160,38 @@ export default function Home() {
                   </div>
                   <div className="text-center">
                     <p className="text-accent font-medium animate-pulse-green">
-                      Generating 3D model...
+                      {phase === "enhancing"
+                        ? "Enhancing sketch for depth..."
+                        : "Generating 3D model..."}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      This may take 30-60 seconds
+                      {phase === "enhancing"
+                        ? "Adding shading and depth cues (15-20s)"
+                        : "Converting to 3D geometry (30-60s)"}
                     </p>
                   </div>
-                  {sourceImage && (
-                    <div className="mt-4 opacity-30">
-                      <img
-                        src={sourceImage}
-                        alt="Source sketch"
-                        className="w-32 h-32 object-contain rounded-lg"
-                      />
-                    </div>
-                  )}
+                  <div className="mt-4 flex gap-3 items-end">
+                    {sourceImage && (
+                      <div className="opacity-30">
+                        <p className="text-[10px] text-gray-600 mb-1 text-center">Sketch</p>
+                        <img
+                          src={sourceImage}
+                          alt="Source sketch"
+                          className="w-24 h-24 object-contain rounded-lg"
+                        />
+                      </div>
+                    )}
+                    {enhancedImage && (
+                      <div className="opacity-80">
+                        <p className="text-[10px] text-accent mb-1 text-center">Enhanced</p>
+                        <img
+                          src={enhancedImage}
+                          alt="Enhanced sketch"
+                          className="w-24 h-24 object-contain rounded-lg border border-accent/30"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -163,6 +219,7 @@ export default function Home() {
                       onClick={() => {
                         setModelUrl(null);
                         setSourceImage(null);
+                        setEnhancedImage(null);
                       }}
                       className="px-4 py-2.5 rounded-lg font-medium bg-surface-light text-foreground hover:bg-border transition-colors"
                     >
@@ -191,14 +248,30 @@ export default function Home() {
             {/* Source image reference */}
             {!loading && modelUrl && sourceImage && (
               <div className="mt-4 p-4 rounded-xl bg-surface border border-border">
-                <p className="text-xs text-gray-500 mb-2 font-medium">
-                  Original Sketch
-                </p>
-                <img
-                  src={sourceImage}
-                  alt="Original sketch"
-                  className="w-32 rounded-lg border border-border"
-                />
+                <div className="flex gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 font-medium">
+                      Original Sketch
+                    </p>
+                    <img
+                      src={sourceImage}
+                      alt="Original sketch"
+                      className="w-32 rounded-lg border border-border"
+                    />
+                  </div>
+                  {enhancedImage && (
+                    <div>
+                      <p className="text-xs text-accent mb-2 font-medium">
+                        AI Enhanced
+                      </p>
+                      <img
+                        src={enhancedImage}
+                        alt="Enhanced sketch"
+                        className="w-32 rounded-lg border border-accent/30"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
